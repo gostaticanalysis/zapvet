@@ -1,0 +1,121 @@
+package fieldtype
+
+import (
+	"go/ast"
+	"go/types"
+	"strconv"
+
+	"github.com/gostaticanalysis/analysisutil"
+	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/analysis/passes/inspect"
+	"golang.org/x/tools/go/ast/inspector"
+)
+
+const doc = "fieldtype finds confliction type of field"
+
+var Analyzer = &analysis.Analyzer{
+	Name: "fieldtype",
+	Doc:  doc,
+	Run:  run,
+	Requires: []*analysis.Analyzer{
+		inspect.Analyzer,
+	},
+}
+
+func run(pass *analysis.Pass) (interface{}, error) {
+	inspect := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
+	zappkg := zap(pass)
+	if zappkg == nil {
+		return nil, nil
+	}
+	fs := fieldFuncs(pass, zappkg)
+
+	m := make(map[string]string)
+	nodes := []ast.Node{(*ast.CallExpr)(nil)}
+	inspect.Preorder(nodes, func(n ast.Node) {
+		call, _ := n.(*ast.CallExpr)
+		funcname, key := fieldkey(pass, fs, call)
+		if fn, exist := m[key]; exist {
+			if fn != funcname {
+				pass.Reportf(n.Pos(), "%q conflict type %s vs %s", key, funcname, fn)
+			}
+		} else {
+			m[key] = funcname
+		}
+	})
+
+	return nil, nil
+}
+
+func zap(pass *analysis.Pass) *types.Package {
+	for _, pkg := range pass.Pkg.Imports() {
+		if analysisutil.RemoveVendor(pkg.Path()) == "go.uber.org/zap" {
+			return pkg
+		}
+	}
+	return nil
+}
+
+func fieldFuncs(pass *analysis.Pass, zappkg *types.Package) []*types.Func {
+	var fs []*types.Func
+	scope := zappkg.Scope()
+	fieldtyp := scope.Lookup("Field").Type()
+	for _, name := range scope.Names() {
+		obj, _ := scope.Lookup(name).(*types.Func)
+		if obj == nil {
+			continue
+		}
+
+		sig, _ := obj.Type().(*types.Signature)
+		if sig == nil {
+			continue
+		}
+
+		rets := sig.Results()
+		if rets.Len() != 1 ||
+			!types.Identical(rets.At(0).Type(), fieldtyp) {
+			continue
+		}
+
+		params := sig.Params()
+		if params.Len() != 2 ||
+			!types.Identical(params.At(0).Type(), types.Typ[types.String]) {
+			continue
+		}
+
+		fs = append(fs, obj)
+	}
+	return fs
+}
+
+func fieldkey(pass *analysis.Pass, fs []*types.Func, call *ast.CallExpr) (funcname, key string) {
+	var id *ast.Ident
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		id = fun
+	case *ast.SelectorExpr:
+		id = fun.Sel
+	}
+	obj := pass.TypesInfo.ObjectOf(id)
+	if obj == nil {
+		return "", ""
+	}
+
+	for _, f := range fs {
+		if f == obj {
+			tv := pass.TypesInfo.Types[call.Args[0]]
+			if tv.Value == nil {
+				return "", ""
+			}
+
+			key, err := strconv.Unquote(tv.Value.String())
+			if err != nil {
+				return "", ""
+			}
+
+			return f.Name(), key
+		}
+	}
+
+	return "", ""
+}
