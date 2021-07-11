@@ -3,8 +3,8 @@ package fieldtype_test
 import (
 	"testing"
 
-	"github.com/gostaticanalysis/zapvet/passes/fieldtype"
 	"github.com/gostaticanalysis/testutil"
+	"github.com/gostaticanalysis/zapvet/passes/fieldtype"
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
