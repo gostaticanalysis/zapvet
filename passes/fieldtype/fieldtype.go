@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/types"
 	"strconv"
+	"strings"
 
 	"github.com/gostaticanalysis/analysisutil"
 	"golang.org/x/tools/go/analysis"
@@ -12,6 +13,10 @@ import (
 )
 
 const doc = "fieldtype finds confliction type of field"
+
+var (
+	flagIgnoreFuncs string
+)
 
 var Analyzer = &analysis.Analyzer{
 	Name: "fieldtype",
@@ -22,6 +27,10 @@ var Analyzer = &analysis.Analyzer{
 	},
 }
 
+func init() {
+	Analyzer.Flags.StringVar(&flagIgnoreFuncs, "ignore", "Any", "comma separated ignore function names")
+}
+
 func run(pass *analysis.Pass) (interface{}, error) {
 	inspect := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 	zappkg := zap(pass)
@@ -29,6 +38,9 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		return nil, nil
 	}
 	fs := fieldFuncs(pass, zappkg)
+	for _, ignore := range strings.Split(flagIgnoreFuncs, ",") {
+		delete(fs, strings.TrimSpace(ignore))
+	}
 
 	m := make(map[string]string)
 	nodes := []ast.Node{(*ast.CallExpr)(nil)}
@@ -56,8 +68,8 @@ func zap(pass *analysis.Pass) *types.Package {
 	return nil
 }
 
-func fieldFuncs(pass *analysis.Pass, zappkg *types.Package) []*types.Func {
-	var fs []*types.Func
+func fieldFuncs(pass *analysis.Pass, zappkg *types.Package) map[string]*types.Func {
+	fs := make(map[string]*types.Func)
 	scope := zappkg.Scope()
 	fieldtyp := scope.Lookup("Field").Type()
 	for _, name := range scope.Names() {
@@ -83,12 +95,12 @@ func fieldFuncs(pass *analysis.Pass, zappkg *types.Package) []*types.Func {
 			continue
 		}
 
-		fs = append(fs, obj)
+		fs[obj.Name()] = obj
 	}
 	return fs
 }
 
-func fieldkey(pass *analysis.Pass, fs []*types.Func, call *ast.CallExpr) (funcname, key string) {
+func fieldkey(pass *analysis.Pass, fs map[string]*types.Func, call *ast.CallExpr) (funcname, key string) {
 	var id *ast.Ident
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
@@ -97,25 +109,20 @@ func fieldkey(pass *analysis.Pass, fs []*types.Func, call *ast.CallExpr) (funcna
 		id = fun.Sel
 	}
 	obj := pass.TypesInfo.ObjectOf(id)
-	if obj == nil {
+	f := fs[obj.Name()]
+	if f == nil || f != obj {
 		return "", ""
 	}
 
-	for _, f := range fs {
-		if f == obj {
-			tv := pass.TypesInfo.Types[call.Args[0]]
-			if tv.Value == nil {
-				return "", ""
-			}
-
-			key, err := strconv.Unquote(tv.Value.String())
-			if err != nil {
-				return "", ""
-			}
-
-			return f.Name(), key
-		}
+	tv := pass.TypesInfo.Types[call.Args[0]]
+	if tv.Value == nil {
+		return "", ""
 	}
 
-	return "", ""
+	key, err := strconv.Unquote(tv.Value.String())
+	if err != nil {
+		return "", ""
+	}
+
+	return f.Name(), key
 }

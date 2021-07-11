@@ -11,5 +11,6 @@ import (
 // TestAnalyzer is a test for Analyzer.
 func TestAnalyzer(t *testing.T) {
 	testdata := testutil.WithModules(t, analysistest.TestData(), nil)
+	fieldtype.Analyzer.Flags.Set("ignore", "Any, Reflect")
 	analysistest.Run(t, testdata, fieldtype.Analyzer, "a")
 }
