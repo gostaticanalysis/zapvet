@@ -8,4 +8,5 @@ func f() {
 	zap.Any("id", "100")     // OK - ignore
 	zap.Reflect("id", "100") // OK - ignore
 	zap.String("xxx", "100") // OK
+	func() {}()              // OK
 }

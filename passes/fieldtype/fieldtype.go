@@ -107,8 +107,15 @@ func fieldkey(pass *analysis.Pass, fs map[string]*types.Func, call *ast.CallExpr
 		id = fun
 	case *ast.SelectorExpr:
 		id = fun.Sel
+	default:
+		return "", ""
 	}
+
 	obj := pass.TypesInfo.ObjectOf(id)
+	if obj == nil {
+		return "", ""
+	}
+
 	f := fs[obj.Name()]
 	if f == nil || f != obj {
 		return "", ""
