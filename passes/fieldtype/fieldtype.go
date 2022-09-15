@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gostaticanalysis/analysisutil"
+	"github.com/gostaticanalysis/zapvet/utils"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
@@ -33,11 +33,11 @@ func init() {
 
 func run(pass *analysis.Pass) (interface{}, error) {
 	inspect := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
-	zappkg := zap(pass)
+	zappkg := utils.FilterForZap(pass)
 	if zappkg == nil {
 		return nil, nil
 	}
-	fs := fieldFuncs(pass, zappkg)
+	fs := fieldFuncs(zappkg)
 	for _, ignore := range strings.Split(flagIgnoreFuncs, ",") {
 		delete(fs, strings.TrimSpace(ignore))
 	}
@@ -59,16 +59,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	return nil, nil
 }
 
-func zap(pass *analysis.Pass) *types.Package {
-	for _, pkg := range pass.Pkg.Imports() {
-		if analysisutil.RemoveVendor(pkg.Path()) == "go.uber.org/zap" {
-			return pkg
-		}
-	}
-	return nil
-}
-
-func fieldFuncs(pass *analysis.Pass, zappkg *types.Package) map[string]*types.Func {
+func fieldFuncs(zappkg *types.Package) map[string]*types.Func {
 	fs := make(map[string]*types.Func)
 	scope := zappkg.Scope()
 	fieldtyp := scope.Lookup("Field").Type()
